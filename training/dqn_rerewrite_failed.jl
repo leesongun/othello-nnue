@@ -4,20 +4,20 @@ using Bits
 using Flux
 
 
-nf = 32
+nf = 3
 #model = Dense(128, 64, tanh)
 model = Chain(
     #Conv((1, 1), 2 => nf, mish, pad=SamePad()),
-    block(nf), block(nf), 
+    block(nf), #block(nf), 
     Conv((1, 1), nf => 1, tanh, pad=SamePad()),
     )
 
 toplane(a::UInt64) = reshape(bits(a), 8, 8, 1, 1)
-input(a::Game) = cat(toplane(a.a), toplane(a.b), zeros(Float32, 8, 8, nf - 2), dims=3)
+input(a::Game) = cat(toplane(a.a), toplane(a.b), zeros(Float32, 8, 8, nf - 2, 1), dims=3)
+input(a::Vector{Game}) = cat((input).(a)..., dims = 4)
 output(a::Game) = model(input(a))
+output(a::Vector{Game}) = model(input(a))
 value(a::Game) = sum(output(a))
-#input(a::Vector{Game}) = cat((input).(a)..., dims = 4)
-
 
 #higher is better
 function against_random()
@@ -96,10 +96,12 @@ for i in 1:10000000000000
 
     parameters = params(model)
 
-    data = (cat((input).(x_train)..., dims=4), cat(y_train..., dims=4))
+    data = (x_train, cat(y_train..., dims=4))
     loader = Flux.Data.DataLoader(data, batchsize=64, shuffle=true)
 
-    loss(x, y) = Flux.Losses.mse(model(x), y)
+    loss(x, y) = Flux.Losses.mse(output(x), y)
+    #loss(x) = Flux.Losses.mse(model(cat(a->a[1] for a in x, dims=4)), x[2])
+    #evalcb() = @show(loss(x_train, y_train))
 
     for epoch in 1:2
         Flux.train!(loss, parameters, loader, opt)
