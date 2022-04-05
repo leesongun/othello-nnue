@@ -2,18 +2,18 @@ include("./othello.jl");
 include("./model.jl");
 using Bits
 using Flux
-using CUDA
+#using CUDA
 
 nf = 32
 #model1 = Chain(Dense(128, 256, gelu), Dense(256, 64, tanh))
 #model2 = Chain(Dense(128, 256, gelu), Dense(256, 64, tanh))
 
 model1 = Chain(block(nf), block(nf), block(nf), block(nf), Conv((1, 1), nf => 1, tanh, pad=SamePad()),)
-model2 = Chain(block(nf), block(nf), block(nf), block(nf))
+model2 = Chain(block(nf), block(nf), block(nf), block(nf), Conv((1, 1), nf => 1, tanh, pad=SamePad()),)
 
 toplane(a::UInt64) = reshape(bits(a), 8, 8, 1, 1)
 #input(a::Game) = vcat(bits(a.a), bits(a.b))
-input(a::Game) = cat(toplane(a.a), toplane(a.b), zeros(8, 8, nf - 2), dims=3)
+input(a::Game) = cat(toplane(a.a), toplane(a.b), zeros(Float32, 8, 8, nf - 2), dims=3)
 #tood : add tanh
 output(x) = x[:, :, 1:1, :]
 
@@ -123,8 +123,8 @@ for i in 1:10000000000000
         Flux.train!(loss2, parameters2, data2, opt, cb=evalcb2)
     end
 
-    if i % 30 == 0
-        t = (x -> against_random()).(1:100)
+    if i % 5 == 0
+        t = (x -> against_random()).(1:10)
         print(sum(t) / length(t), "\n")
     end
     # open("model/weights.txt", "a+") do io
