@@ -3,11 +3,20 @@ include("./model.jl");
 using Bits
 using Flux
 
-model = Dense(128, 64, tanh)
+
+nf = 3
+#model = Dense(128, 64, tanh)
+model = Chain(
+    #Conv((1, 1), 2 => nf, mish, pad=SamePad()),
+    block(nf), #block(nf), 
+    Conv((1, 1), nf => 1, tanh, pad=SamePad()),
+    )
 
 toplane(a::UInt64) = reshape(bits(a), 8, 8, 1, 1)
-input(a::Game) = cat(toplane(a.a), toplane(a.b), dims=3)
+input(a::Game) = cat(toplane(a.a), toplane(a.b), zeros(Float32, 8, 8, nf - 2, 1), dims=3)
+input(a::Vector{Game}) = cat((input).(a)..., dims = 4)
 output(a::Game) = model(input(a))
+output(a::Vector{Game}) = model(input(a))
 value(a::Game) = sum(output(a))
 
 #higher is better
@@ -35,8 +44,8 @@ function against_random()
     return score
 end
 
-function generate_traindata!(data)
-    temp = []
+function generate_traindata!(positions, values)
+    turns = []
     turn = false
     g = init()
     while notend(g)
@@ -46,7 +55,8 @@ function generate_traindata!(data)
             turn = !turn
         end
 
-        push!(temp, (g, turn))
+        push!(positions, g)
+        push!(turns, turn)
 
         pair = (x->(x,-value(g + x))).(moves(g))
         maxmove = findmax((x->sum(x[2])).(pair))[2]
@@ -57,12 +67,11 @@ function generate_traindata!(data)
             move = pair[maxmove][1]
         end
         
-        
         g = g + move
     end
     score = toplane(g.b) .* 2 .- 1
-    value_data = (x[1], (x[2] == turn ? score : -score)) for x in temp
-    append!(data, value_data)
+    value_data = ((x == turn ? score : -score) for x in turns)
+    append!(values, value_data)
 end
 
 opt = RADAMW(0.1, (0.9, 0.999), 1)
@@ -72,10 +81,12 @@ for i in 1:10000000000000
 
     testmode!(model)
 
-    train_data = []
+    x_train::Vector{Game} = []
+    y_train = []
+    #y_train::Vector{Array{Int, 4}} = []
 
     while length(x_train) <= 256
-        generate_traindata!(train_data)
+        generate_traindata!(x_train, y_train)
     end
 
     #model |> gpu
@@ -84,10 +95,12 @@ for i in 1:10000000000000
     testmode!(model, false)
 
     parameters = params(model)
-    
-    loader = DataLoader(train_data, batchsize=64, shuffle=true)
 
-    loss(x, y) = Flux.Losses.mse(model(input(x)), y)
+    data = (x_train, cat(y_train..., dims=4))
+    loader = Flux.Data.DataLoader(data, batchsize=64, shuffle=true)
+
+    loss(x, y) = Flux.Losses.mse(output(x), y)
+    #loss(x) = Flux.Losses.mse(model(cat(a->a[1] for a in x, dims=4)), x[2])
     #evalcb() = @show(loss(x_train, y_train))
 
     for epoch in 1:2
